@@ -29,10 +29,15 @@ PxFilterFlags FilterShader(
 	PxFilterObjectAttributes attributes1, PxFilterData filterData1,
 	PxPairFlags& pairFlags, const void* constantBlock, PxU32 constantBlockSize)
 {
+	if ((filterData0.word0 & 0b01111) && (filterData1.word0 & 0b01111))
+	{
+		return PxFilterFlag::eKILL;
+	}
+
 	if ((filterData0.word0 == FilterGroup::BALL_SLOW) ||
 		(filterData1.word0 == FilterGroup::BALL_SLOW))
 	{
-		pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND | PxPairFlag::eTRIGGER_DEFAULT;
+		pairFlags |= PxPairFlag::eTRIGGER_DEFAULT | PxPairFlag::eNOTIFY_TOUCH_FOUND;
 		return PxFilterFlag::eDEFAULT;
 	}
 
@@ -56,51 +61,6 @@ PxFilterFlags FilterShader(
 	return PxFilterFlag::eDEFAULT;
 }
 
-static PxRigidDynamic* createBallBounce(const PxTransform& t, const PxGeometry& geometry,
-                                        const PxVec3& velocity = PxVec3(0))
-{
-	PxFilterData filterData;
-	filterData.word0 = {FilterGroup::BALL_BOUNCE};
-	filterData.word1 = {FilterGroup::WALL};
-
-	PxShape* shape = gPhysics->createShape(geometry, *gMaterial);
-	PxRigidDynamic* dynamic = gPhysics->createRigidDynamic(t);
-	shape->setSimulationFilterData(filterData);
-
-	dynamic->setAngularDamping(0.5f);
-	dynamic->setLinearVelocity(velocity);
-	dynamic->attachShape(*shape);
-
-	gScene->addActor(*dynamic);
-
-	shape->release();
-
-	return dynamic;
-}
-
-static PxRigidDynamic* createBallIgnore(const PxTransform& t, const PxGeometry& geometry,
-                                        const PxVec3& velocity = PxVec3(0))
-{
-	PxFilterData filterData;
-	filterData.word0 = {FilterGroup::BALL_THROUGH};
-	filterData.word1 = {FilterGroup::WALL};
-
-	PxShape* shape = gPhysics->createShape(geometry, *gMaterial);
-	PxRigidDynamic* dynamic = gPhysics->createRigidDynamic(t);
-	shape->setSimulationFilterData(filterData);
-
-	dynamic->setAngularDamping(0.5f);
-	dynamic->setLinearVelocity(velocity);
-	dynamic->attachShape(*shape);
-
-	gScene->addActor(*dynamic);
-
-	shape->release();
-
-	return dynamic;
-}
-
-
 static void createWall(const PxTransform& t, PxU32 size, PxReal halfExtent)
 {
 	PxFilterData filterData;
@@ -113,59 +73,30 @@ static void createWall(const PxTransform& t, PxU32 size, PxReal halfExtent)
 
 	shape->setSimulationFilterData(filterData);
 
-	const PxTransform localTm(PxVec3(PxReal(10) - PxReal(size), PxReal(1), 0) * halfExtent);
+	const PxTransform localTm(PxVec3(PxReal(10) - PxReal(size), PxReal(1), -1) * halfExtent);
 	PxRigidStatic* body = gPhysics->createRigidStatic(t.transform(localTm));
 	body->attachShape(*shape);
-
+	body->setGlobalPose({ 10, 3, 0 });
 	gScene->addActor(*body);
 
 	shape->release();
 }
 
-static void createBallFlyUp(const PxTransform& camera)
+static void createBall(const PxFilterData& filterData, const PxTransform& position)
 {
-	PxFilterData filterData;
-	filterData.word0 = {FilterGroup::BALL_FLY};
-	filterData.word1 = {FilterGroup::WALL};
-
 	PxShape* shape = gPhysics->createShape(PxSphereGeometry(3.0f), *gMaterial);
-
+	
 	shape->setSimulationFilterData(filterData);
 
-	const PxVec3 transform(PxVec3(-10, -4, -10) * 20);
-	PxRigidDynamic* body = gPhysics->createRigidDynamic(camera);
+	PxRigidDynamic* body = gPhysics->createRigidDynamic(position);
 
-	body->setLinearVelocity(transform);
+	body->setLinearVelocity(PxVec3(0, 0, -1) * 125);
 
 	body->attachShape(*shape);
 
 	gScene->addActor(*body);
 
 	shape->release();
-}
-
-static void createBallSlow(const PxTransform& camera)
-{
-	PxFilterData filterData;
-	filterData.word0 = {FilterGroup::BALL_SLOW};
-	filterData.word1 = {FilterGroup::WALL};
-
-	PxShape* shape = gPhysics->createShape(PxSphereGeometry(3.0f), *gMaterial);
-
-	shape->setSimulationFilterData(filterData);
-
-	const PxVec3 transform(PxVec3(-10, -4, -10) * 20);
-	PxRigidDynamic* body = gPhysics->createRigidDynamic(camera);
-
-	body->setLinearVelocity(transform);
-
-	body->attachShape(*shape);
-
-	gScene->addActor(*body);
-
-	shape->release();
-
-	bodyList.push_back(body);
 }
 
 void initPhysics(bool interactive)
@@ -233,26 +164,30 @@ void cleanupPhysics(bool /*interactive*/)
 
 void keyPress(unsigned char key, const PxTransform& camera)
 {
+	PxFilterData filterData;
+
+	filterData.word1 = { FilterGroup::WALL };
+
 	switch (toupper(key))
 	{
 	case ' ':
 		switch (ballCount)
 		{
 		case 0:
-			createBallIgnore(camera, PxSphereGeometry(3.0f), PxVec3(-10, -4, -10) * 20);
+			filterData.word0 = { FilterGroup::BALL_THROUGH };
 			break;
 		case 1:
-			createBallBounce(camera, PxSphereGeometry(3.0f), PxVec3(-10, -4, -10) * 20);
+			filterData.word0 = { FilterGroup::BALL_BOUNCE };
 			break;
 		case 2:
-			createBallFlyUp(camera);
+			filterData.word0 = { FilterGroup::BALL_FLY };
 			break;
 		case 3:
-			createBallSlow(camera);
+			filterData.word0 = { FilterGroup::BALL_SLOW };
 			break;
 		}
 
-		createBallSlow(camera);
+		createBall(filterData, PxTransform(10, 20, 50));
 		ballCount = (ballCount + 1) % 4;
 		break;
 	}
